@@ -1,0 +1,31 @@
+# secrets
+.env
+.env.*
+*.key
+secrets/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.python-version
+
+# data / outputs
+data/raw/
+data/staging/
+*.csv
+*.parquet
+*.duckdb
+spike/*.json
+
+# dbt (for later)
+target/
+dbt_packages/
+logs/
+.user.yml
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
