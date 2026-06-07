@@ -9,7 +9,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-.python-version
 
 # data / outputs
 data/raw/
@@ -29,3 +28,6 @@ logs/
 .DS_Store
 .vscode/
 .idea/
+
+# exceptions
+!seeds/*.csv
