@@ -1,0 +1,33 @@
+name: 'fed_capture'
+version: '1.0.0'
+config-version: 2
+
+profile: 'fed_capture'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+    - "target"
+    - "dbt_packages"
+
+# Default materialization rules per model layer
+models:
+    fed_capture:
+        staging:
+            +schema: staging
+            +materialized: view
+        intermediate:
+            +schema: intermediate
+            +materialized: view
+        marts:
+            +schema: marts
+            +materialized: table
+
+seeds:
+    fed_capture:
+        +schema: seeds
