@@ -1,0 +1,94 @@
+version: 2
+
+sources:
+  - name: raw
+    database: fed_capture
+    schema: raw
+    description: "Raw ingested data from external APIs, preserved with source fidelity"
+    tables:
+      - name: sam_opportunities
+        description: "SAM.gov opportunities ingested by ingest/sam.py. One row per unique notice_id."
+        config:
+          loaded_at_field: ingested_at
+          freshness:
+            warn_after: { count: 2, period: day }
+            error_after: { count: 7, period: day }
+        columns:
+          - name: notice_id
+            description: "Globally unique notice identifier from SAM.gov"
+            data_tests:
+              - unique
+              - not_null
+          - name: ingested_at
+            description: "When this row was last loaded into Snowflake"
+            data_tests:
+              - not_null
+
+models:
+  - name: stg_sam_opportunities
+    description: |
+      Cleaned and standardized SAM.gov opportunities. One row per unique notice_id.
+      Source: RAW.SAM_OPPORTUNITIES via ingest/sam.py.
+
+      Applies type casting, snake_case naming, VARIANT field extraction, and derived
+      flags (is_us_location, has_attachments). Downstream models should reference this
+      rather than the raw table directly.
+    columns:
+      - name: notice_id
+        description: "Globally unique notice identifier (primary key)"
+        data_tests:
+          - unique
+          - not_null
+      - name: solicitation_number
+        description: "Solicitation number; not globally unique (can repeat across notices)"
+      - name: posted_date
+        description: "Date the notice was first posted on SAM"
+        data_tests:
+          - not_null
+      - name: response_deadline
+        description: "Response/bid deadline with original timezone preserved"
+      - name: archive_date
+        description: "Date the notice will be / was archived"
+      - name: archive_type
+        description: "Archive policy (e.g., auto15, manual)"
+      - name: naics_code
+        description: "Primary NAICS code for this opportunity"
+        data_tests:
+          - not_null
+      - name: psc_code
+        description: "Product Service Code (parallel taxonomy to NAICS)"
+      - name: notice_type
+        description: |
+          Lifecycle stage of the notice: Sources Sought, Presolicitation,
+          Solicitation, Combined Synopsis/Solicitation, Award Notice,
+          Special Notice, Justification, etc.
+        data_tests:
+          - not_null
+      - name: base_notice_type
+        description: "Original notice type before any transitions"
+      - name: is_active
+        description: "TRUE if the notice is currently active in SAM"
+        data_tests:
+          - not_null
+      - name: type_of_set_aside
+        description: "Set-aside designation (e.g., 'Total Small Business', 'WOSB', 'No Set aside used')"
+      - name: title
+        description: "Human-readable opportunity title"
+      - name: agency_path
+        description: "Full agency hierarchy as dot-delimited string (department.agency.command.office)"
+      - name: state
+        description: "Place-of-performance state or ISO 3166-2 subdivision code"
+      - name: country_code
+        description: "Place-of-performance country code (3-letter, e.g., USA)"
+      - name: zip_code
+        description: "Place-of-performance zip/postal code"
+      - name: is_us_location
+        description: "TRUE if place of performance is in the United States"
+      - name: ui_link
+        description: "Direct URL to the opportunity page on SAM.gov for human browsing"
+      - name: description_url
+        description: "API URL pointing to the full description text"
+      - name: has_attachments
+        description: "TRUE if the notice has resource attachments (SOW, PWS, etc.)"
+      - name: ingested_at
+        description: "When this row was last loaded into Snowflake from SAM"
