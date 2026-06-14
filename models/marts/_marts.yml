@@ -1,0 +1,105 @@
+version: 2
+
+models:
+  - name: mart_opportunities
+    description: |
+      Federal contract opportunities mart. One row per SAM.gov notice with full
+      dimensional enrichment: agency hierarchy split, lifecycle stage categorization,
+      set-aside rolled-up categories, deadline urgency, NAICS metadata from seed.
+
+      Designed as the single source for opportunity-level Tableau dashboards.
+      Filter and group at dashboard time rather than building specialized marts.
+    columns:
+      - name: notice_id
+        description: "Globally unique SAM notice identifier (primary key)"
+        data_tests:
+          - unique
+          - not_null
+      - name: posted_date
+        description: "Date the notice was first posted on SAM.gov"
+        data_tests:
+          - not_null
+      - name: response_deadline
+        description: "Response/bid deadline with original timezone preserved"
+      - name: archive_date
+        description: "Date the notice will be / was archived"
+      - name: days_since_posted
+        description: "Integer days from posted_date to current date"
+      - name: days_until_deadline
+        description: "Integer days from current time to response_deadline; NULL if expired or no deadline"
+      - name: deadline_urgency
+        description: "Categorical urgency bucket for filtering"
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['No Deadline', 'Expired', 'Closes This Week', 'Closes This Month', 'Open > 30 Days']
+      - name: naics_code
+        description: "Primary NAICS code"
+        data_tests:
+          - not_null
+      - name: naics_description
+        description: "NAICS description from the target_naics seed (NULL for NAICS outside the seed)"
+      - name: naics_priority
+        description: "Strategic priority categorization from the target_naics seed"
+      - name: psc_code
+        description: "Product Service Code (parallel taxonomy to NAICS)"
+      - name: notice_type
+        description: "Raw notice type from SAM (e.g., Solicitation, Sources Sought, Award Notice)"
+        data_tests:
+          - not_null
+      - name: bid_lifecycle_stage
+        description: "Lifecycle stage rolled up from notice_type: Pre-Bid, Bid Window, Post-Award, Other"
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Pre-Bid', 'Bid Window', 'Post-Award', 'Other']
+      - name: is_active
+        description: "TRUE if notice is currently active in SAM"
+        data_tests:
+          - not_null
+      - name: type_of_set_aside
+        description: "Raw set-aside designation from SAM"
+      - name: set_aside_category
+        description: "Set-aside rolled up to qualification category for filtering"
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 'Open Competition'
+                  - '8(a) Business Development'
+                  - 'HUBZone'
+                  - 'Women-Owned Small Business'
+                  - 'SDVOSB'
+                  - 'Veteran-Owned Small Business'
+                  - 'Indian-Owned (ISBEE)'
+                  - 'Small Business (General)'
+                  - 'Other Restricted'
+      - name: is_bid_ready
+        description: "TRUE if active, in bid window stage, and deadline is in the future. Quick filter for 'what can I bid on right now'"
+        data_tests:
+          - not_null
+      - name: title
+        description: "Opportunity title"
+      - name: agency_path
+        description: "Full agency hierarchy as dot-delimited string"
+      - name: department
+        description: "Top-level department (e.g., DEPT OF DEFENSE)"
+      - name: agency
+        description: "Second-level agency (e.g., DEPT OF THE AIR FORCE)"
+      - name: command
+        description: "Third-level command (e.g., AIR FORCE MATERIEL COMMAND)"
+      - name: office
+        description: "Fourth-level office"
+      - name: state
+        description: "Place-of-performance state or ISO 3166-2 subdivision code"
+      - name: country_code
+        description: "Place-of-performance country code (3-letter)"
+      - name: is_us_location
+        description: "TRUE if place of performance is in the United States"
+      - name: has_attachments
+        description: "TRUE if the notice has resource attachments"
+      - name: ui_link
+        description: "Direct URL to the SAM.gov opportunity page"
