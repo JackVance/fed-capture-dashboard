@@ -17,6 +17,7 @@ data/staging/
 *.parquet
 *.duckdb
 spike/*.json
+exports/*.csv
 
 # dbt (for later)
 target/
@@ -29,5 +30,5 @@ logs/
 .vscode/
 .idea/
 
-# exceptions
+# exceptions (do not ignore)
 !seeds/*.csv
