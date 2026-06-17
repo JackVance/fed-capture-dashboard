@@ -1,6 +1,6 @@
-"""Ingest SAM.gov opportunities for target NAICS into Snowflake RAW schema.
+"""Ingest SAM.gov opportunities into Snowflake RAW schema (date-based).
 
-Pulls all opportunities matching the configured NAICS list (with pagination),
+Pulls all opportunities posted within the configured window (with pagination),
 deduplicates by noticeId, and loads into RAW.SAM_OPPORTUNITIES via MERGE.
 Idempotent: re-running replaces existing rows by notice_id.
 
@@ -8,7 +8,6 @@ Usage:
     uv run --env-file .env python ingest/sam.py
 """
 import os
-import csv
 import json
 import logging
 import time
@@ -41,25 +40,18 @@ SAM_API_KEY = os.environ.get("SAM_API_KEY")
 if not SAM_API_KEY:
     raise RuntimeError("SAM_API_KEY not found in environment")
 
-WINDOW_DAYS = 90       # how far back to pull
+WINDOW_DAYS = 7       # how far back to pull
 PAGE_SIZE = 1000       # SAM v2 API max per page
 SAM_API_URL = "https://api.sam.gov/opportunities/v2/search"
 
 
 # --- API helpers ----------------------------------------------------------
 
-def load_target_naics() -> list[str]:
-    """Read target NAICS codes from the seed CSV."""
-    naics_file = PROJECT_ROOT / "seeds" / "target_naics.csv"
-    with naics_file.open() as f:
-        reader = csv.DictReader(f)
-        codes = [row["naics_code"] for row in reader]
-    log.info(f"Loaded {len(codes)} NAICS codes: {codes}")
-    return codes
+def fetch_opportunities(posted_from: str, posted_to: str) -> list[dict]:
+    """Fetch all opportunities posted in the date window, paginating with retry-on-429.
 
-
-def fetch_opportunities_for_naics(naics: str, posted_from: str, posted_to: str) -> list[dict]:
-    """Fetch all opportunities for a single NAICS, paginating with retry-on-429."""
+    No NAICS filter — pulls every opportunity in the window regardless of code.
+    """
     results = []
     offset = 0
     while True:
@@ -67,7 +59,6 @@ def fetch_opportunities_for_naics(naics: str, posted_from: str, posted_to: str) 
             "api_key": SAM_API_KEY,
             "postedFrom": posted_from,
             "postedTo": posted_to,
-            "ncode": naics,
             "limit": PAGE_SIZE,
             "offset": offset,
         }
@@ -89,7 +80,7 @@ def fetch_opportunities_for_naics(naics: str, posted_from: str, posted_to: str) 
                 except Exception:
                     body = r.text[:500]
                 log.warning(
-                    f"429 on NAICS {naics} offset {offset} (attempt {attempt + 1}/5). "
+                    f"429 at offset {offset} (attempt {attempt + 1}/5). "
                     f"Headers: {rate_headers}. Body: {body}"
                 )
                 wait = 2 ** attempt
@@ -98,12 +89,13 @@ def fetch_opportunities_for_naics(naics: str, posted_from: str, posted_to: str) 
             r.raise_for_status()
             break
         else:
-            raise RuntimeError(f"Exhausted retries on NAICS {naics} at offset {offset}")
+            raise RuntimeError(f"Exhausted retries at offset {offset}")
 
         data = r.json()
         records = data.get("opportunitiesData", [])
         total = data.get("totalRecords", 0)
         results.extend(records)
+        log.info(f"  page at offset {offset}: fetched {len(records)} (running total {len(results)} of {total})")
         offset += PAGE_SIZE
         if offset >= total or not records:
             break
@@ -204,22 +196,21 @@ WHEN NOT MATCHED THEN INSERT (
 
 def main():
     # 1. Pull from SAM API
-    target_naics = load_target_naics()
     posted_from = (datetime.now() - timedelta(days=WINDOW_DAYS)).strftime("%m/%d/%Y")
     posted_to = datetime.now().strftime("%m/%d/%Y")
     log.info(f"Pulling SAM opportunities posted {posted_from} to {posted_to}")
 
-    all_opps = {}  # noticeId -> opp (dedups across NAICS)
-    for naics in target_naics:
-        opps = fetch_opportunities_for_naics(naics, posted_from, posted_to)
-        for opp in opps:
-            nid = opp.get("noticeId")
-            if nid:
-                all_opps[nid] = opp
-        log.info(f"  NAICS {naics}: fetched {len(opps)} (unique running total: {len(all_opps)})")
+    opps = fetch_opportunities(posted_from, posted_to)
 
-    log.info(f"Total unique opportunities to load: {len(all_opps)}")
-    if not all_opps:
+    # Dedup defensively in case pagination returned overlap
+    by_notice_id: dict[str, dict] = {}
+    for opp in opps:
+        nid = opp.get("noticeId")
+        if nid:
+            by_notice_id[nid] = opp
+
+    log.info(f"Fetched {len(opps)} raw records, {len(by_notice_id)} unique by notice_id")
+    if not by_notice_id:
         log.warning("No opportunities. Exiting without touching Snowflake.")
         return
 
@@ -244,7 +235,7 @@ def main():
 
         # 4. Load DataFrame to a staging table
         log.info("Writing to staging table RAW.SAM_OPPORTUNITIES_STAGING...")
-        df = opps_to_dataframe(list(all_opps.values()))
+        df = opps_to_dataframe(list(by_notice_id.values()))
         success, num_chunks, num_rows, _ = write_pandas(
             conn,
             df,
