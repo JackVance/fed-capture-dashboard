@@ -17,9 +17,12 @@ data/staging/
 *.parquet
 *.duckdb
 spike/*.json
+tableau/*.twbx
+tableau/Data/
+tableau/Backups/
 exports/*.csv
 
-# dbt (for later)
+# dbt 
 target/
 dbt_packages/
 logs/
