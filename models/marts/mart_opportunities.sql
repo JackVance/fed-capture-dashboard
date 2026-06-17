@@ -6,21 +6,21 @@ WITH opps AS (
 
 ),
 
-naics AS (
-
-    SELECT * FROM {{ ref('target_naics') }}
-
-),
-
 joined AS (
 
     SELECT
         o.*,
-        n.description AS naics_description,
-        n.priority    AS naics_priority
+        n.naics_title       AS naics_description,
+        n.sector_code,
+        n.sector_name,
+        p.psc_name,
+        p.psc_category,
+        p.psc_type
     FROM opps o
-    LEFT JOIN naics n
+    LEFT JOIN {{ ref('dim_naics') }} n
         ON o.naics_code = n.naics_code
+    LEFT JOIN {{ ref('dim_psc') }} p
+        ON o.psc_code = p.psc_code
 
 ),
 
@@ -78,6 +78,100 @@ categorized AS (
 
 ),
 
+flagged AS (
+
+    SELECT
+        categorized.*,
+
+        -- Atomic work-path flags based on NAICS and PSC categorization
+        (psc_category = 'IT Services'
+            OR naics_code IN ('511210', '518210', '541511', '541512', '541513', '541519'))
+            AS is_software_or_it,
+
+        -- Studies and accessible analytical work
+        (psc_category = 'Special Studies & Analysis'
+            OR naics_code IN ('541910'))
+            AS is_studies_or_analysis,
+
+        -- Specialized R&D with typical PhD/lab requirements
+        (psc_category = 'R&D'
+            OR naics_code IN ('541713', '541714', '541715', '541720'))
+            AS is_specialized_research,
+
+        (psc_category = 'Architecture & Engineering'
+            OR LEFT(naics_code, 4) = '5413')
+            AS is_engineering_services,
+
+        (LEFT(naics_code, 4) = '5416')
+            AS is_consulting_advisory,
+
+        (psc_category IN (
+            'Construction of Structures',
+            'Maintenance of Structures',
+            'Maintenance & Repair',
+            'Modification of Equipment'
+         )
+            OR LEFT(naics_code, 2) = '23')
+            AS is_construction_or_maintenance,
+
+        (psc_category IN (
+            'Operation of Government Facilities',
+            'Installation of Equipment',
+            'Utilities & Housekeeping',
+            'Transportation, Travel, Relocation',
+            'Lease/Rental of Equipment',
+            'Lease/Rental of Facilities'
+         ))
+            AS is_physical_service,
+
+        (psc_type = 'Product')
+            AS is_product_procurement
+
+    FROM categorized
+
+),
+
+flagged_composite AS (
+
+    SELECT
+        flagged.*,
+
+        -- Composite umbrella flags
+        (is_software_or_it
+         OR is_studies_or_analysis
+         OR is_specialized_research
+         OR is_engineering_services
+         OR is_consulting_advisory)
+            AS is_intellectual_product,
+
+        -- Personal target zone: intellectual product, excluding hands-on/physical work, credentialed engineering services, specialized research
+        ((is_software_or_it
+            OR is_studies_or_analysis
+            OR is_consulting_advisory)
+            AND NOT is_construction_or_maintenance
+            AND NOT is_physical_service
+            AND NOT is_product_procurement
+            AND NOT is_engineering_services
+            AND NOT is_specialized_research)
+                AS is_personal_target_zone,
+
+        -- Primary work path (mutually exclusive, precedence-based)
+        CASE
+            WHEN is_software_or_it             THEN 'Software & IT'
+            WHEN is_studies_or_analysis        THEN 'Studies & Analysis'
+            WHEN is_specialized_research       THEN 'Specialized R&D'
+            WHEN is_engineering_services       THEN 'Engineering Services'
+            WHEN is_consulting_advisory        THEN 'Consulting & Advisory'
+            WHEN is_construction_or_maintenance THEN 'Construction & Maintenance'
+            WHEN is_physical_service           THEN 'Physical Services'
+            WHEN is_product_procurement        THEN 'Product Procurement'
+            ELSE 'Other / Uncategorized'
+        END AS work_path_primary
+
+    FROM flagged
+
+),
+
 final AS (
 
     SELECT
@@ -92,6 +186,7 @@ final AS (
         -- Dates
         posted_date,
         response_deadline,
+        response_deadline::DATE AS response_deadline_date,
         archive_date,
         days_since_posted,
         days_until_deadline,
@@ -100,11 +195,69 @@ final AS (
         -- Classification
         naics_code,
         naics_description,
-        naics_priority,
+        sector_code,
+        sector_name,
         psc_code,
+        psc_name,
+        -- Derive PSC category from code prefix; resilient to dim coverage gaps
+        COALESCE(
+            psc_category,
+            CASE 
+                WHEN psc_code IS NULL THEN 'No PSC Code'
+                ELSE 
+                    CASE SUBSTR(psc_code, 1, 1)
+                        WHEN 'A' THEN 'R&D'
+                        WHEN 'B' THEN 'Special Studies & Analysis'
+                        WHEN 'C' THEN 'Architecture & Engineering'
+                        WHEN 'D' THEN 'IT Services'
+                        WHEN 'E' THEN 'Purchase of Structures & Facilities'
+                        WHEN 'F' THEN 'Natural Resources & Conservation'
+                        WHEN 'G' THEN 'Social Services'
+                        WHEN 'H' THEN 'Quality Control & Inspection'
+                        WHEN 'J' THEN 'Maintenance & Repair'
+                        WHEN 'K' THEN 'Modification of Equipment'
+                        WHEN 'L' THEN 'Technical Representation'
+                        WHEN 'M' THEN 'Operation of Government Facilities'
+                        WHEN 'N' THEN 'Installation of Equipment'
+                        WHEN 'P' THEN 'Salvage Services'
+                        WHEN 'Q' THEN 'Medical Services'
+                        WHEN 'R' THEN 'Support Services'
+                        WHEN 'S' THEN 'Utilities & Housekeeping'
+                        WHEN 'T' THEN 'Photographic, Mapping, Printing'
+                        WHEN 'U' THEN 'Education & Training'
+                        WHEN 'V' THEN 'Transportation, Travel, Relocation'
+                        WHEN 'W' THEN 'Lease/Rental of Equipment'
+                        WHEN 'X' THEN 'Lease/Rental of Facilities'
+                        WHEN 'Y' THEN 'Construction of Structures'
+                        WHEN 'Z' THEN 'Maintenance of Structures'
+                        ELSE 'Products'
+                    END
+            END
+        ) AS psc_category,
+        COALESCE(psc_type,
+            CASE 
+                WHEN psc_code IS NULL THEN 'No PSC Code'
+                WHEN LEFT(psc_code, 1) BETWEEN 'A' AND 'Z' THEN 'Service'
+                WHEN LEFT(psc_code, 1) BETWEEN '0' AND '9' THEN 'Product'
+                ELSE 'Other'
+            END
+        ) AS psc_type,
         notice_type,
         base_notice_type,
         bid_lifecycle_stage,
+
+        -- Work path classification flags
+        is_software_or_it,
+        is_studies_or_analysis,
+        is_specialized_research,
+        is_engineering_services,
+        is_consulting_advisory,
+        is_construction_or_maintenance,
+        is_physical_service,
+        is_product_procurement,
+        is_intellectual_product,
+        is_personal_target_zone,
+        work_path_primary,
 
         -- Status & qualification
         is_active,
@@ -134,7 +287,7 @@ final AS (
         -- Metadata
         ingested_at
 
-    FROM categorized
+    FROM flagged_composite
 
 )
 

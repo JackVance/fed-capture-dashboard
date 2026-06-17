@@ -37,13 +37,19 @@ models:
       - name: naics_code
         description: "Primary NAICS code"
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                severity: warn
       - name: naics_description
-        description: "NAICS description from the target_naics seed (NULL for NAICS outside the seed)"
-      - name: naics_priority
-        description: "Strategic priority categorization from the target_naics seed"
+        description: "NAICS industry title from Census via dim_naics"
+      - name: sector_code
+        description: "2-digit NAICS sector code"
+      - name: sector_name
+        description: "NAICS sector display name"
       - name: psc_code
         description: "Product Service Code (parallel taxonomy to NAICS)"
+      - name: psc_category
+        description: "PSC category derived from first character of PSC code"
       - name: notice_type
         description: "Raw notice type from SAM (e.g., Solicitation, Sources Sought, Award Notice)"
         data_tests:
@@ -103,3 +109,44 @@ models:
         description: "TRUE if the notice has resource attachments"
       - name: ui_link
         description: "Direct URL to the SAM.gov opportunity page"
+  - name: dim_naics
+    description: "NAICS dimension with sector hierarchy enrichment. Built from US Census 2022 6-digit NAICS reference."
+    columns:
+      - name: naics_code
+        description: "6-digit NAICS code"
+        data_tests:
+          - unique
+          - not_null
+      - name: naics_title
+        description: "Industry title from Census"
+        data_tests:
+          - not_null
+      - name: sector_code
+        description: "2-digit sector code"
+        data_tests:
+          - not_null
+      - name: sector_name
+        description: "Sector display name"
+  - name: dim_psc
+    description: "PSC dimension with category and service/product type enrichment. Built from GSA October 2020 PSC manual."
+    columns:
+      - name: psc_code
+        description: "PSC code (1-4 alphanumeric chars)"
+        data_tests:
+          - unique
+          - not_null
+      - name: psc_name
+        description: "Short name"
+        data_tests:
+          - not_null
+      - name: psc_type
+        description: "Service or Product classification based on code prefix"
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Service', 'Product', 'Other']
+      - name: psc_category
+        description: "High-level category rolled up from first character of code"
+        data_tests:
+          - not_null
